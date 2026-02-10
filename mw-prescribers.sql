@@ -1,12 +1,12 @@
 -- 1. a. Which prescriber had the highest total number of claims (totaled over all drugs)? Report the npi and the total number of claims.
 
-SELECT p1.npi, total_claim_count, CONCAT(nppes_provider_first_name,' ',nppes_provider_mi,'. ',nppes_provider_last_org_name) AS name
+SELECT p1.npi,CONCAT(nppes_provider_first_name,' ',nppes_provider_mi,'. ',nppes_provider_last_org_name) AS name, SUM(total_claim_count) AS claims
 FROM prescriber AS p1
 LEFT JOIN prescription AS p2
 	ON p1.npi = p2.npi
 WHERE total_claim_count IS NOT NULL
-ORDER BY total_claim_count DESC
-LIMIT 100
+GROUP BY name,p1.npi
+ORDER BY claims DESC;
 
 -- b. Repeat the above, but this time report the nppes_provider_first_name, nppes_provider_last_org_name, specialty_description, and the total number of claims.
 SELECT p1.npi, total_claim_count, specialty_description,CONCAT(nppes_provider_first_name,' ',nppes_provider_mi,'. ',nppes_provider_last_org_name) AS name
@@ -27,19 +27,40 @@ GROUP BY specialty_description
 ORDER BY total_claims DESC;
 
 -- b. Which specialty had the most total number of claims for opioids?
-SELECT COUNT(CASE WHEN opioid_drug_flag = 'Y' THEN 1 END) AS opioid_claims,specialty_description
-FROM prescriber AS p1
-LEFT JOIN prescription AS p2
-	ON p1.npi = p2.npi
-LEFT JOIN drug AS d1
-	ON p2.drug_name = d1.drug_name
-WHERE total_claim_count IS NOT NULL
+SELECT specialty_description, sum(total_claim_count)
+FROM prescription
+INNER JOIN prescriber
+USING(npi)
+INNER JOIN drug
+USING(drug_name)
+WHERE opioid_drug_flag = 'Y'
 GROUP BY specialty_description
-ORDER BY opioid_claims DESC;
-
+ORDER BY sum DESC;
 -- c. Challenge Question: Are there any specialties that appear in the prescriber table that have no associated prescriptions in the prescription table?
+SELECT specialty_description, COUNT(prescription.*) AS total_prescriptions
+FROM prescriber
+FULL JOIN prescription
+USING (npi)
+GROUP BY specialty_description
+HAVING COUNT(prescription.*) = 0;
+
+
+
 
 -- d. Difficult Bonus: Do not attempt until you have solved all other problems! For each specialty, report the percentage of total claims by that specialty which are for opioids. Which specialties have a high percentage of opioids?
+-- Not sure on this one chief, check w/ instructor
+SELECT specialty_description, (COUNT(CASE WHEN opioid_drug_flag='Y' THEN total_claim_count END)/sum(total_claim_count)*100.0) AS percentage
+FROM prescription
+INNER JOIN prescriber
+USING(npi)
+INNER JOIN drug
+USING(drug_name)
+WHERE opioid_drug_flag = 'Y'
+GROUP BY specialty_description
+ORDER BY percentage DESC;
+
+
+
 
 -- 3. a. Which drug (generic_name) had the highest total drug cost?
 SELECT d1.generic_name, sum(total_drug_cost)::money AS drug_cost
@@ -53,10 +74,11 @@ ORDER BY drug_cost DESC;
 -- b. Which drug (generic_name) has the hightest total cost per day? Bonus: Round your cost per day column to 2 decimal places. Google ROUND to see how this works.
 SELECT 
     d.generic_name,
-    ROUND(SUM(p.total_drug_cost) / SUM(p.total_day_supply), 2) AS cost_per_day
+    (ROUND(SUM(p.total_drug_cost) / SUM(p.total_day_supply), 2))::money AS cost_per_day
 FROM prescription p
-JOIN drug d ON p.drug_name = d.drug_name
-WHERE p.total_day_supply > 0  -- Avoid division by zero
+JOIN drug AS d 
+	ON p.drug_name = d.drug_name
+WHERE p.total_day_supply > 0
 GROUP BY d.generic_name
 ORDER BY cost_per_day DESC
 LIMIT 100;
@@ -68,30 +90,33 @@ SELECT drug_name,
 	ELSE 'neither'
 	END AS drug_type
 FROM drug
+ORDER BY drug_type;
 
 -- b. Building off of the query you wrote for part a, determine whether more was spent (total_drug_cost) on opioids or on antibiotics. Hint: Format the total costs as MONEY for easier comparision.
-SELECT sum(total_drug_cost)::MONEY,
+SELECT sum(total_drug_cost)::MONEY AS total_cost,
 	CASE WHEN opioid_drug_flag = 'Y' THEN 'opioid'
 		WHEN antibiotic_drug_flag = 'Y' THEN 'antibiotic'
 		ELSE 'neither'
 		END AS drug_type
 FROM drug
 LEFT JOIN prescription AS p1
-	ON drug.drug_name = p1.drug_name
-GROUP BY drug_type
+	USING(drug_name)
+GROUP BY drug_type;
 
 -- 5. a. How many CBSAs are in Tennessee? Warning: The cbsa table contains information for all states, not just Tennessee.
-SELECT *
+SELECT COUNT(DISTINCT cbsa)
 FROM cbsa
-WHERE cbsaname LIKE '%TN%';
+INNER JOIN fips_county
+USING(fipscounty)
+WHERE state LIKE '%TN%';
 
 -- b. Which cbsa has the largest combined population? Which has the smallest? Report the CBSA name and total population.
-SELECT cbsaname, sum(population) AS total_pop
+SELECT cbsa,cbsaname, sum(population) AS total_pop
 FROM cbsa
 LEFT JOIN population AS p1
 	ON cbsa.fipscounty = p1.fipscounty
 WHERE population IS NOT NULL
-GROUP BY cbsaname
+GROUP BY cbsa,cbsaname
 ORDER BY total_pop DESC;
 
 -- c. What is the largest (in terms of population) county which is not included in a CBSA? Report the county name and population.
